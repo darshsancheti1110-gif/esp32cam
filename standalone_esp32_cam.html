@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32-CAM Security Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+    .cctv-scanlines {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                  linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 3px, 6px 100%;
+      pointer-events: none;
+    }
+    .cctv-grid {
+      background-size: 40px 40px;
+      background-image: linear-gradient(to right, rgba(20, 184, 166, 0.08) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(20, 184, 166, 0.08) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col antialiased selection:bg-teal-500/30 selection:text-teal-200">
+
+  <!-- Top Navigation Bar -->
+  <header class="sticky top-0 z-40 w-full border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-teal-950/60 border border-teal-500/30 text-teal-400 flex items-center justify-center">
+          <i data-lucide="shield" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-base sm:text-lg font-bold tracking-tight">ESP32-CAM Security Hub</span>
+            <div id="status-badge" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-zinc-900 border border-zinc-800">
+              <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span class="text-emerald-400 font-semibold text-[11px]">LIVE</span>
+            </div>
+          </div>
+          <div id="camera-url-display" class="text-xs text-zinc-400 font-mono truncate max-w-xs">http://192.168.1.15</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="config-btn" class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-900 border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors">
+          <i data-lucide="settings" class="w-4 h-4 text-teal-400"></i>
+          <span>IP Settings</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Body Grid -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      
+      <!-- Left Column: Video Feed & Action Toolbar (8 cols) -->
+      <div class="lg:col-span-8 space-y-4">
+        
+        <!-- Live Feed Viewport -->
+        <div id="viewport-container" class="relative w-full aspect-video bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl select-none">
+          <div class="absolute inset-0 cctv-scanlines z-10 pointer-events-none opacity-40"></div>
+          <div class="absolute inset-0 cctv-grid z-10 pointer-events-none opacity-60"></div>
+
+          <!-- Video Stream Image -->
+          <div class="absolute inset-0 flex items-center justify-center bg-zinc-950">
+            <img id="stream-img" src="http://192.168.1.15/stream" alt="Live Feed" class="w-full h-full object-contain pointer-events-none" />
+          </div>
+
+          <!-- Flashlight Beam Overlay -->
+          <div id="flash-overlay" class="absolute inset-0 pointer-events-none z-15 mix-blend-screen opacity-0 transition-opacity duration-300"
+               style="background: radial-gradient(circle at center, rgba(254, 240, 138, 0.45) 0%, rgba(253, 224, 71, 0.15) 45%, rgba(0,0,0,0) 75%);"></div>
+
+          <!-- Shutter Flash -->
+          <div id="shutter-flash" class="absolute inset-0 bg-white pointer-events-none z-30 opacity-0 transition-opacity duration-150"></div>
+
+          <!-- OSD Overlay -->
+          <div class="absolute inset-0 z-20 pointer-events-none p-4 flex flex-col justify-between font-mono text-xs">
+            <div class="flex items-center justify-between bg-zinc-950/50 backdrop-blur-xs p-2 rounded-lg border border-zinc-800/40">
+              <div class="flex items-center gap-2">
+                <span class="text-red-500 font-bold flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500 animate-ping inline-block"></span>REC</span>
+                <span class="text-zinc-500">|</span>
+                <span class="text-zinc-200">CAM-01 [LIVE]</span>
+              </div>
+              <div id="osd-clock" class="text-emerald-400 font-semibold tabular-nums">2026-10-19 12:00:00</div>
+            </div>
+
+            <div class="flex items-center justify-between bg-zinc-950/50 backdrop-blur-xs p-2 rounded-lg border border-zinc-800/40">
+              <div class="flex items-center gap-2 text-zinc-400">
+                <span id="osd-fps" class="text-teal-300">25 FPS</span>
+                <span>·</span>
+                <span id="osd-pt" class="text-teal-300">PT: 90°/90°</span>
+                <span>·</span>
+                <span id="osd-res">VGA (640x480)</span>
+              </div>
+              <div id="osd-flash-status" class="hidden text-amber-300 font-semibold flex items-center gap-1">
+                <i data-lucide="zap" class="w-3.5 h-3.5 fill-current"></i> FLASH ON
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Toolbar -->
+        <div class="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 shadow-lg flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <button id="snap-btn" class="flex items-center gap-2 px-4 py-2 text-xs font-bold text-zinc-950 bg-teal-400 hover:bg-teal-300 active:scale-95 rounded-lg shadow-md transition-all">
+              <i data-lucide="camera" class="w-4 h-4"></i>
+              <span>Snapshot</span>
+            </button>
+            <button id="flash-btn" class="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-all">
+              <i data-lucide="flashlight" class="w-4 h-4 text-zinc-400"></i>
+              <span id="flash-label">Flashlight</span>
+            </button>
+            <button id="refresh-btn" class="p-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="fs-btn" class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg">
+              <i data-lucide="maximize" class="w-4 h-4 text-teal-400"></i>
+              <span>Fullscreen</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Snapshot Gallery -->
+        <div class="w-full bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden p-5">
+          <div class="flex items-center justify-between pb-3 border-b border-zinc-800 mb-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="image" class="w-4 h-4 text-teal-400"></i>
+              <h3 class="text-sm font-bold text-zinc-100">Snapshot Gallery</h3>
+              <span id="gallery-count" class="text-xs font-mono text-zinc-400">(0)</span>
+            </div>
+            <button id="clear-gallery-btn" class="text-xs text-zinc-400 hover:text-red-400">Clear All</button>
+          </div>
+          <div id="gallery-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div id="gallery-empty" class="col-span-full py-8 text-center text-xs text-zinc-500 font-mono">
+              No snapshots captured yet. Click Snapshot to capture frames.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: PTZ Joystick & Camera Controls (4 cols) -->
+      <div class="lg:col-span-4 space-y-4">
+        
+        <!-- Pan & Tilt Joystick Card -->
+        <div class="w-full bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl p-5 space-y-4">
+          <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <div class="flex items-center gap-2">
+              <i data-lucide="compass" class="w-4 h-4 text-teal-400"></i>
+              <h3 class="text-sm font-bold text-zinc-100">Pan & Tilt Servos</h3>
+            </div>
+            <button id="center-btn" class="flex items-center gap-1 px-2.5 py-1 text-xs bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 rounded-lg text-zinc-200">
+              <i data-lucide="rotate-ccw" class="w-3 h-3 text-teal-400"></i>
+              <span>Center</span>
+            </button>
+          </div>
+
+          <!-- Angle Readouts -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-2.5 bg-zinc-950 rounded-xl border border-zinc-800 text-center">
+              <div class="text-[10px] text-zinc-400 uppercase">Pan (X)</div>
+              <div id="pan-display" class="text-lg font-bold font-mono text-teal-400">90°</div>
+            </div>
+            <div class="p-2.5 bg-zinc-950 rounded-xl border border-zinc-800 text-center">
+              <div class="text-[10px] text-zinc-400 uppercase">Tilt (Y)</div>
+              <div id="tilt-display" class="text-lg font-bold font-mono text-teal-400">90°</div>
+            </div>
+          </div>
+
+          <!-- Joystick Pad -->
+          <div class="flex justify-center py-2">
+            <div id="joystick-base" class="relative w-44 h-44 rounded-full bg-zinc-950 border-2 border-zinc-800 flex items-center justify-center cursor-grab active:cursor-grabbing select-none"
+                 style="background: radial-gradient(circle, #18181b 0%, #09090b 80%);">
+              <div class="absolute w-full h-[1px] bg-zinc-800"></div>
+              <div class="absolute h-full w-[1px] bg-zinc-800"></div>
+              <div id="joystick-knob" class="absolute w-12 h-12 rounded-full bg-zinc-800 border-2 border-teal-500/40 text-teal-400 flex items-center justify-center shadow-lg pointer-events-none">
+                <i data-lucide="crosshair" class="w-5 h-5"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- D-Pad Nudges -->
+          <div class="flex justify-center items-center gap-2 pt-1">
+            <button onclick="nudgePan(-5)" class="p-2.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300"><i data-lucide="arrow-left" class="w-4 h-4"></i></button>
+            <div class="flex flex-col gap-2">
+              <button onclick="nudgeTilt(5)" class="p-2.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
+              <button onclick="nudgeTilt(-5)" class="p-2.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300"><i data-lucide="arrow-down" class="w-4 h-4"></i></button>
+            </div>
+            <button onclick="nudgePan(5)" class="p-2.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300"><i data-lucide="arrow-right" class="w-4 h-4"></i></button>
+          </div>
+        </div>
+
+        <!-- Camera Settings Controls -->
+        <div class="w-full bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl p-5 space-y-4 text-xs">
+          <div class="flex items-center gap-2 border-b border-zinc-800 pb-3">
+            <i data-lucide="sliders" class="w-4 h-4 text-teal-400"></i>
+            <h3 class="text-sm font-bold text-zinc-100">Camera Registers</h3>
+          </div>
+
+          <!-- Resolution Dropdown -->
+          <div>
+            <label class="block text-zinc-300 font-medium mb-1">Resolution (framesize)</label>
+            <select id="framesize-select" class="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-zinc-100 font-mono">
+              <option value="10">UXGA (1600x1200)</option>
+              <option value="9">SXGA (1280x1024)</option>
+              <option value="8">XGA (1024x768)</option>
+              <option value="7">SVGA (800x600)</option>
+              <option value="6" selected>VGA (640x480)</option>
+              <option value="5">CIF (400x296)</option>
+              <option value="4">QVGA (320x240)</option>
+            </select>
+          </div>
+
+          <!-- Quality Slider -->
+          <div>
+            <div class="flex justify-between text-zinc-300 mb-1">
+              <span>JPEG Quality</span>
+              <span id="quality-val" class="font-mono text-teal-400">12</span>
+            </div>
+            <input id="quality-slider" type="range" min="10" max="63" value="12" class="w-full accent-teal-400" />
+          </div>
+
+          <!-- Brightness Slider -->
+          <div>
+            <div class="flex justify-between text-zinc-300 mb-1">
+              <span>Brightness</span>
+              <span id="brightness-val" class="font-mono text-teal-400">0</span>
+            </div>
+            <input id="brightness-slider" type="range" min="-2" max="2" value="0" class="w-full accent-teal-400" />
+          </div>
+
+          <!-- Contrast Slider -->
+          <div>
+            <div class="flex justify-between text-zinc-300 mb-1">
+              <span>Contrast</span>
+              <span id="contrast-val" class="font-mono text-teal-400">0</span>
+            </div>
+            <input id="contrast-slider" type="range" min="-2" max="2" value="0" class="w-full accent-teal-400" />
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // State
+    let espIp = localStorage.getItem('esp32_cam_ip') || 'http://192.168.1.15';
+    let pan = 90;
+    let tilt = 90;
+    let flashOn = false;
+    let snapshots = [];
+
+    const streamImg = document.getElementById('stream-img');
+    const cameraUrlDisplay = document.getElementById('camera-url-display');
+    const panDisplay = document.getElementById('pan-display');
+    const tiltDisplay = document.getElementById('tilt-display');
+    const osdPt = document.getElementById('osd-pt');
+    const flashBtn = document.getElementById('flash-btn');
+    const flashOverlay = document.getElementById('flash-overlay');
+    const shutterFlash = document.getElementById('shutter-flash');
+    const osdFlashStatus = document.getElementById('osd-flash-status');
+
+    function updateUrl() {
+      cameraUrlDisplay.textContent = espIp;
+      streamImg.src = espIp + '/stream?t=' + Date.now();
+    }
+    updateUrl();
+
+    // Clock
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById('osd-clock').textContent = now.toISOString().replace('T', ' ').substring(0, 19);
+    }, 1000);
+
+    // Send Control Command
+    async function sendControl(variable, val) {
+      const url = `${espIp}/control?var=${variable}&val=${val}`;
+      try {
+        await fetch(url, { mode: 'no-cors' });
+      } catch (e) {
+        console.warn('Command dispatched:', url);
+      }
+    }
+
+    // Flashlight Toggle
+    flashBtn.addEventListener('click', () => {
+      flashOn = !flashOn;
+      sendControl('flash', flashOn ? 1 : 0);
+      flashOverlay.style.opacity = flashOn ? '0.7' : '0';
+      if (flashOn) {
+        osdFlashStatus.classList.remove('hidden');
+        flashBtn.classList.add('bg-amber-500/20', 'border-amber-500/50', 'text-amber-300');
+      } else {
+        osdFlashStatus.classList.add('hidden');
+        flashBtn.classList.remove('bg-amber-500/20', 'border-amber-500/50', 'text-amber-300');
+      }
+    });
+
+    // Resolution & Sliders
+    document.getElementById('framesize-select').addEventListener('change', (e) => {
+      sendControl('framesize', e.target.value);
+      document.getElementById('osd-res').textContent = e.target.options[e.target.selectedIndex].text;
+    });
+
+    document.getElementById('quality-slider').addEventListener('input', (e) => {
+      document.getElementById('quality-val').textContent = e.target.value;
+      sendControl('quality', e.target.value);
+    });
+
+    document.getElementById('brightness-slider').addEventListener('input', (e) => {
+      document.getElementById('brightness-val').textContent = e.target.value;
+      sendControl('brightness', e.target.value);
+      streamImg.style.filter = `brightness(${100 + e.target.value * 20}%)`;
+    });
+
+    document.getElementById('contrast-slider').addEventListener('input', (e) => {
+      document.getElementById('contrast-val').textContent = e.target.value;
+      sendControl('contrast', e.target.value);
+    });
+
+    // Pan & Tilt Servos
+    function updateServo(p, t) {
+      pan = Math.max(0, Math.min(180, p));
+      tilt = Math.max(0, Math.min(180, t));
+      panDisplay.textContent = pan + '°';
+      tiltDisplay.textContent = tilt + '°';
+      osdPt.textContent = `PT: ${pan}°/${tilt}°`;
+      sendControl('pan', pan);
+      sendControl('tilt', tilt);
+    }
+
+    function nudgePan(d) { updateServo(pan + d, tilt); }
+    function nudgeTilt(d) { updateServo(pan, tilt + d); }
+
+    document.getElementById('center-btn').addEventListener('click', () => {
+      updateServo(90, 90);
+      document.getElementById('joystick-knob').style.transform = 'translate(0px, 0px)';
+    });
+
+    // Joystick Drag Logic
+    const base = document.getElementById('joystick-base');
+    const knob = document.getElementById('joystick-knob');
+    let isDragging = false;
+
+    base.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      base.setPointerCapture(e.pointerId);
+      handlePointer(e);
+    });
+
+    base.addEventListener('pointermove', (e) => {
+      if (isDragging) handlePointer(e);
+    });
+
+    function stopDrag(e) {
+      if (isDragging) {
+        isDragging = false;
+        try { base.releasePointerCapture(e.pointerId); } catch(err) {}
+      }
+    }
+    base.addEventListener('pointerup', stopDrag);
+    base.addEventListener('pointercancel', stopDrag);
+
+    function handlePointer(e) {
+      const rect = base.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const maxR = rect.width / 2 - 20;
+
+      let dx = e.clientX - cx;
+      let dy = e.clientY - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > maxR) {
+        dx = (dx / dist) * maxR;
+        dy = (dy / dist) * maxR;
+      }
+
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+
+      const newPan = Math.round(90 + (dx / maxR) * 90);
+      const newTilt = Math.round(90 - (dy / maxR) * 90);
+      updateServo(newPan, newTilt);
+    }
+
+    // Snapshot Capture
+    document.getElementById('snap-btn').addEventListener('click', () => {
+      shutterFlash.style.opacity = '0.9';
+      setTimeout(() => shutterFlash.style.opacity = '0', 150);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = streamImg.naturalWidth || 640;
+      canvas.height = streamImg.naturalHeight || 480;
+      const ctx = canvas.getContext('2d');
+      try {
+        ctx.drawImage(streamImg, 0, 0);
+      } catch (e) {
+        ctx.fillStyle = '#09090b';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#14b8a6';
+        ctx.font = 'bold 20px monospace';
+        ctx.fillText('ESP32-CAM SNAPSHOT CAPTURE', 20, 50);
+      }
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const snap = { id: Date.now(), dataUrl, time: new Date().toLocaleTimeString() };
+      snapshots.unshift(snap);
+      renderGallery();
+    });
+
+    function renderGallery() {
+      const grid = document.getElementById('gallery-grid');
+      document.getElementById('gallery-count').textContent = `(${snapshots.length})`;
+      if (snapshots.length === 0) {
+        grid.innerHTML = '<div class="col-span-full py-8 text-center text-xs text-zinc-500 font-mono">No snapshots captured yet.</div>';
+        return;
+      }
+      grid.innerHTML = snapshots.map(s => `
+        <div class="bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800">
+          <img src="${s.dataUrl}" class="w-full aspect-video object-cover" />
+          <div class="p-1.5 flex justify-between text-[10px] font-mono text-zinc-400">
+            <span>${s.time}</span>
+            <a href="${s.dataUrl}" download="ESP32_${s.id}.jpg" class="text-teal-400 hover:underline">Save</a>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('clear-gallery-btn').addEventListener('click', () => {
+      snapshots = [];
+      renderGallery();
+    });
+
+    // Refresh & Fullscreen
+    document.getElementById('refresh-btn').addEventListener('click', updateUrl);
+    document.getElementById('fs-btn').addEventListener('click', () => {
+      const el = document.getElementById('viewport-container');
+      if (!document.fullscreenElement) el.requestFullscreen().catch(() => {});
+      else document.exitFullscreen().catch(() => {});
+    });
+
+    // Config IP Modal Prompt
+    document.getElementById('config-btn').addEventListener('click', () => {
+      const newIp = prompt('Enter ESP32-CAM base URL (e.g. http://192.168.1.15):', espIp);
+      if (newIp && newIp.trim()) {
+        espIp = newIp.trim().replace(/\\/+$/, '');
+        if (!/^https?:\\/\\//i.test(espIp)) espIp = 'http://' + espIp;
+        localStorage.setItem('esp32_cam_ip', espIp);
+        updateUrl();
+      }
+    });
+
+    // Keyboard Arrow Keys
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') nudgePan(-5);
+      if (e.key === 'ArrowRight') nudgePan(5);
+      if (e.key === 'ArrowUp') nudgeTilt(5);
+      if (e.key === 'ArrowDown') nudgeTilt(-5);
+      if (e.code === 'Space') document.getElementById('snap-btn').click();
+    });
+
+    lucide.createIcons();
+  </script>
+</body>
+</html>

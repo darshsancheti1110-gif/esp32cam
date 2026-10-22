@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32-CAM Pan & Tilt Security Hub</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      background-color: #09090b;
+      color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-teal-500/30 selection:text-teal-200">
+
+  <!-- Header / Navbar -->
+  <header class="sticky top-0 z-40 bg-zinc-900/90 backdrop-blur-md border-b border-zinc-800">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <div class="p-2 rounded-xl bg-teal-500/15 text-teal-400 border border-teal-500/30">
+          <i data-lucide="shield-check" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold tracking-tight text-zinc-100 flex items-center gap-2">
+            <span>ESP32-CAM Hub</span>
+            <span id="badge-mode" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">SIMULATOR</span>
+          </h1>
+          <p id="ip-display" class="text-[11px] font-mono text-zinc-400">http://192.168.1.15</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btn-mode-toggle" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-500 bg-emerald-600 text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-500 transition-all cursor-pointer">
+          Switch to Hardware
+        </button>
+        <button id="btn-config" class="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-750 transition-all cursor-pointer" title="Settings / IP Config">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+      <!-- Left: Live Video Feed (8 cols) -->
+      <div class="lg:col-span-8 space-y-4">
+        <div id="cctv-viewport" class="relative w-full aspect-video bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
+          <!-- Canvas for Simulator / Stream -->
+          <canvas id="sim-canvas" width="640" height="480" class="w-full h-full object-cover"></canvas>
+          <img id="mjpeg-stream" class="hidden w-full h-full object-cover" alt="ESP32-CAM MJPEG Stream" />
+
+          <!-- OSD / CCTV HUD -->
+          <div id="hud-overlay" class="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between font-mono text-[11px]">
+            <div class="flex justify-between items-center text-teal-400 drop-shadow">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                <span class="font-bold tracking-wider">LIVE FEED [CAM-01]</span>
+              </div>
+              <span id="hud-clock" class="text-zinc-300">00:00:00</span>
+            </div>
+            <div class="flex justify-between items-end text-zinc-300 text-[10px] drop-shadow">
+              <div>
+                <span>PAN: <b id="hud-pan" class="text-teal-400">90°</b></span> · 
+                <span>TILT: <b id="hud-tilt" class="text-teal-400">90°</b></span>
+              </div>
+              <span id="hud-fps" class="text-emerald-400">FPS: 24.5</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: PTZ & Toolbar (4 cols) -->
+      <div class="lg:col-span-4 space-y-5">
+
+        <!-- 1. Pan & Tilt Servo Control -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950/40">
+            <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+              <i data-lucide="compass" class="w-4 h-4 text-teal-400"></i>
+              <span>Pan & Tilt Servo Control</span>
+            </h3>
+            <div class="flex items-center gap-1.5">
+              <button id="btn-save-angle" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-all border border-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer font-medium active:scale-95 shrink-0">
+                <i data-lucide="save" class="w-4 h-4 text-white"></i>
+                <span>Angle</span>
+              </button>
+              <button id="btn-center" class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-all border border-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer font-medium active:scale-95">
+                <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-white"></i>
+                <span>Center</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="p-5 space-y-4">
+            <!-- Telemetry readout -->
+            <div class="grid grid-cols-2 gap-3 text-center">
+              <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+                <div class="text-[10px] uppercase font-semibold text-zinc-400">Pan (X)</div>
+                <div id="readout-pan" class="text-xl font-bold font-mono text-teal-400">90°</div>
+              </div>
+              <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+                <div class="text-[10px] uppercase font-semibold text-zinc-400">Tilt (Y)</div>
+                <div id="readout-tilt" class="text-xl font-bold font-mono text-teal-400">90°</div>
+              </div>
+            </div>
+
+            <!-- D-Pad Directional Controls -->
+            <div class="flex justify-center items-center gap-2 pt-2">
+              <button onclick="nudge(-5, 0)" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-md transition-all active:scale-95 cursor-pointer">
+                <i data-lucide="arrow-left" class="w-4 h-4 text-white"></i>
+              </button>
+              <div class="flex flex-col gap-2">
+                <button onclick="nudge(0, 5)" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-md transition-all active:scale-95 cursor-pointer">
+                  <i data-lucide="arrow-up" class="w-4 h-4 text-white"></i>
+                </button>
+                <button onclick="nudge(0, -5)" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-md transition-all active:scale-95 cursor-pointer">
+                  <i data-lucide="arrow-down" class="w-4 h-4 text-white"></i>
+                </button>
+              </div>
+              <button onclick="nudge(5, 0)" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-md transition-all active:scale-95 cursor-pointer">
+                <i data-lucide="arrow-right" class="w-4 h-4 text-white"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Action Toolbar -->
+        <div class="w-full bg-zinc-900/90 backdrop-blur-md border border-zinc-800 rounded-2xl p-2 sm:p-3.5 shadow-xl flex items-center justify-between gap-1.5 sm:gap-3 overflow-x-auto no-scrollbar">
+          <div class="flex items-center gap-1 sm:gap-2.5 min-w-0">
+            <!-- Snapshot Button -->
+            <button id="btn-snapshot" class="flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2.5 text-[11px] sm:text-xs font-bold text-zinc-950 bg-teal-400 hover:bg-teal-300 active:scale-98 rounded-lg shadow-md transition-all cursor-pointer shrink-0">
+              <i data-lucide="camera" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-950"></i>
+              <span>Snapshot</span>
+            </button>
+
+            <!-- Flashlight Button -->
+            <button id="btn-flash" class="p-1.5 sm:p-2 text-xs font-bold rounded-lg border border-yellow-500/40 bg-yellow-400 hover:bg-yellow-300 text-zinc-950 shadow-md transition-all cursor-pointer active:scale-98 shrink-0 flex items-center justify-center">
+              <i data-lucide="flashlight" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-950"></i>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+            <!-- HUD Toggle -->
+            <button id="btn-hud" class="p-1.5 sm:p-2 rounded-lg border border-teal-500/30 bg-teal-500/15 text-teal-400 transition-colors shrink-0">
+              <i data-lucide="eye" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
+            </button>
+            <!-- Reconnect Button -->
+            <button id="btn-refresh" class="p-1.5 sm:p-2.5 text-white bg-red-600 hover:bg-red-500 active:scale-98 border border-red-500 rounded-lg transition-all shadow-md shadow-red-600/30 cursor-pointer shrink-0">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white"></i>
+            </button>
+            <!-- Fullscreen Button -->
+            <button id="btn-fullscreen" class="flex items-center gap-1 sm:gap-1.5 p-1.5 sm:px-3 sm:py-2 text-[11px] sm:text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 shadow-md shadow-emerald-600/30 rounded-lg transition-all cursor-pointer active:scale-95 shrink-0">
+              <i data-lucide="maximize-2" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white"></i>
+              <span class="hidden sm:inline">Fullscreen</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. Camera Settings Accordion -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
+          <div id="settings-header" class="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950/40 cursor-pointer">
+            <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+              <i data-lucide="sliders" class="w-4 h-4 text-teal-400"></i>
+              <span>Camera Settings</span>
+            </h3>
+            <i data-lucide="chevron-down" id="settings-chevron" class="w-4 h-4 text-zinc-400 transition-transform"></i>
+          </div>
+
+          <div id="settings-body" class="p-5 space-y-4 text-xs">
+            <!-- Resolution -->
+            <div>
+              <label class="font-medium text-zinc-300 block mb-1">Resolution (framesize)</label>
+              <select id="sel-framesize" onchange="sendControl('framesize', this.value)" class="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none">
+                <option value="10">UXGA (1600x1200)</option>
+                <option value="9">SXGA (1280x1024)</option>
+                <option value="8">XGA (1024x768)</option>
+                <option value="7">SVGA (800x600)</option>
+                <option value="6" selected>VGA (640x480)</option>
+                <option value="5">CIF (400x296)</option>
+                <option value="4">QVGA (320x240)</option>
+              </select>
+            </div>
+
+            <!-- Quality -->
+            <div>
+              <div class="flex justify-between text-zinc-300 mb-1">
+                <span>JPEG Quality (10-63)</span>
+                <span id="val-quality" class="text-teal-400 font-mono">12</span>
+              </div>
+              <input type="range" min="10" max="63" value="12" class="w-full accent-teal-400" onchange="sendControl('quality', this.value); document.getElementById('val-quality').innerText=this.value;" />
+            </div>
+
+            <!-- Brightness -->
+            <div>
+              <div class="flex justify-between text-zinc-300 mb-1">
+                <span>Brightness (-2 to 2)</span>
+                <span id="val-bright" class="text-teal-400 font-mono">0</span>
+              </div>
+              <input type="range" min="-2" max="2" value="0" class="w-full accent-teal-400" onchange="sendControl('brightness', this.value); document.getElementById('val-bright').innerText=this.value;" />
+            </div>
+
+            <!-- Special Effects -->
+            <div>
+              <label class="font-medium text-zinc-300 block mb-1">Color / Special Effect</label>
+              <select onchange="sendControl('special_effect', this.value)" class="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none">
+                <option value="0">Normal</option>
+                <option value="1">Negative</option>
+                <option value="2">Grayscale</option>
+                <option value="3">Red Tint</option>
+                <option value="4">Green Tint</option>
+                <option value="5">Blue Tint</option>
+                <option value="6">Sepia</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // State
+    const state = {
+      isSimulated: true,
+      ip: 'http://192.168.1.15',
+      pan: 90,
+      tilt: 90,
+      savedAngle: null,
+      flash: 0,
+      hud: true
+    };
+
+    // Canvas Simulator Animation
+    const canvas = document.getElementById('sim-canvas');
+    const ctx = canvas.getContext('2d');
+    let angle = 0;
+
+    function renderSimulator() {
+      if (!state.isSimulated) return;
+      ctx.fillStyle = '#09090b';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid room background
+      ctx.strokeStyle = '#27272a';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // Simulated PTZ camera perspective offset
+      const offsetX = ((state.pan - 90) / 90) * 120;
+      const offsetY = -((state.tilt - 90) / 90) * 90;
+
+      // Draw simulated security target
+      angle += 0.02;
+      ctx.save();
+      ctx.translate(canvas.width / 2 + offsetX, canvas.height / 2 + offsetY);
+      ctx.strokeStyle = '#14b8a6';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 50, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 80 + Math.sin(angle) * 8, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(20, 184, 166, 0.4)';
+      ctx.stroke();
+
+      ctx.fillStyle = '#f4f4f5';
+      ctx.font = '12px monospace';
+      ctx.fillText(`TARGET AT [${state.pan}°, ${state.tilt}°]`, -65, -60);
+      ctx.restore();
+
+      requestAnimationFrame(renderSimulator);
+    }
+    renderSimulator();
+
+    // Pan & Tilt Nudge
+    function nudge(dPan, dTilt) {
+      state.pan = Math.max(0, Math.min(180, state.pan + dPan));
+      state.tilt = Math.max(0, Math.min(180, state.tilt + dTilt));
+      updateAngles();
+      sendServoCommand(state.pan, state.tilt);
+    }
+
+    function updateAngles() {
+      document.getElementById('readout-pan').innerText = `${state.pan}°`;
+      document.getElementById('readout-tilt').innerText = `${state.tilt}°`;
+      document.getElementById('hud-pan').innerText = `${state.pan}°`;
+      document.getElementById('hud-tilt').innerText = `${state.tilt}°`;
+    }
+
+    // Save & Recall Angle Preset
+    const btnSave = document.getElementById('btn-save-angle');
+    btnSave.addEventListener('click', () => {
+      if (state.savedAngle) {
+        state.pan = state.savedAngle.pan;
+        state.tilt = state.savedAngle.tilt;
+        updateAngles();
+        sendServoCommand(state.pan, state.tilt);
+      } else {
+        state.savedAngle = { pan: state.pan, tilt: state.tilt };
+        btnSave.title = `Saved: ${state.pan}°, ${state.tilt}°`;
+        btnSave.innerHTML = `<i data-lucide="target" class="w-4 h-4 text-white"></i><span>Angle</span>`;
+        lucide.createIcons();
+      }
+    });
+
+    // Center Servos
+    document.getElementById('btn-center').addEventListener('click', () => {
+      state.pan = 90;
+      state.tilt = 90;
+      updateAngles();
+      sendServoCommand(90, 90);
+    });
+
+    // Flashlight Toggle
+    document.getElementById('btn-flash').addEventListener('click', () => {
+      state.flash = state.flash === 1 ? 0 : 1;
+      sendControl('flash', state.flash);
+      const btn = document.getElementById('btn-flash');
+      if (state.flash === 1) {
+        btn.className = btn.className.replace('bg-yellow-400', 'bg-yellow-300 ring-2 ring-yellow-400');
+      } else {
+        btn.className = btn.className.replace('bg-yellow-300 ring-2 ring-yellow-400', 'bg-yellow-400');
+      }
+    });
+
+    // HUD Toggle
+    document.getElementById('btn-hud').addEventListener('click', () => {
+      state.hud = !state.hud;
+      document.getElementById('hud-overlay').style.display = state.hud ? 'flex' : 'none';
+    });
+
+    // Fullscreen Toggle
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      const el = document.getElementById('cctv-viewport');
+      if (!document.fullscreenElement) {
+        el.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    // Snapshot Capture
+    document.getElementById('btn-snapshot').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/jpeg');
+      a.download = `ESP32_CAM_${Date.now()}.jpg`;
+      a.click();
+    });
+
+    // Mode Toggle (Simulator vs Live)
+    document.getElementById('btn-mode-toggle').addEventListener('click', () => {
+      state.isSimulated = !state.isSimulated;
+      const badge = document.getElementById('badge-mode');
+      const btn = document.getElementById('btn-mode-toggle');
+      const img = document.getElementById('mjpeg-stream');
+      const sim = document.getElementById('sim-canvas');
+
+      if (state.isSimulated) {
+        badge.innerText = 'SIMULATOR';
+        badge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+        btn.innerText = 'Switch to Hardware';
+        sim.classList.remove('hidden');
+        img.classList.add('hidden');
+        img.src = '';
+        renderSimulator();
+      } else {
+        badge.innerText = 'HARDWARE LIVE';
+        badge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30';
+        btn.innerText = 'Switch to Simulator';
+        sim.classList.add('hidden');
+        img.classList.remove('hidden');
+        img.src = `${state.ip}:81/stream`;
+      }
+    });
+
+    // Settings Accordion
+    document.getElementById('settings-header').addEventListener('click', () => {
+      const body = document.getElementById('settings-body');
+      const chevron = document.getElementById('settings-chevron');
+      body.classList.toggle('hidden');
+      chevron.classList.toggle('rotate-180');
+    });
+
+    // HTTP Command Dispatchers
+    async function sendControl(variable, val) {
+      if (state.isSimulated) return;
+      try {
+        await fetch(`${state.ip}/control?var=${variable}&val=${val}`, { mode: 'no-cors' });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function sendServoCommand(p, t) {
+      if (state.isSimulated) return;
+      try {
+        await fetch(`${state.ip}/servo?pan=${p}&tilt=${t}`, { mode: 'no-cors' });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Live Clock in HUD
+    setInterval(() => {
+      document.getElementById('hud-clock').innerText = new Date().toLocaleTimeString();
+    }, 1000);
+
+    // Initialize Lucide Icons
+    lucide.createIcons();
+  </script>
+</body>
+</html>

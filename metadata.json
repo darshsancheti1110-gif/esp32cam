@@ -1,0 +1,6 @@
+{
+  "name": "ESP32-CAM Security Hub",
+  "description": "Responsive modern CCTV security monitoring web interface for ESP32-CAM with live video stream, PTZ controls, snapshot gallery, camera sensors adjustment, and event logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
